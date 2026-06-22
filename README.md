@@ -6,6 +6,43 @@
 
 Latchz is an open-source, single-binary Windows MDM (Mobile Device Management) server. It enables zero-touch enrollment and continuous configuration management of Windows 10/11 devices via the native OMA-DM protocol.
 
+## Architecture
+
+```mermaid
+graph TB
+    subgraph Devices["Managed Devices"]
+        Windows[Windows 10/11 Devices]
+    end
+
+    subgraph Latchz["Latchz Server (Single Binary)"]
+        subgraph Frontend["Frontend"]
+            React[React 19 Dashboard]
+        end
+        subgraph Backend["Go Backend"]
+            API[REST API]
+            Enrollment[MS-MDE2 / XCEP / WSTEP]
+            MDM[OMA-DM / SyncML]
+            Auth[OIDC Authentication]
+        end
+        PKI[PKI / Certificate Authority]
+    end
+
+    subgraph Storage["Data Layer"]
+        DB[("SQLite / PostgreSQL")]
+    end
+
+    Windows -->|HTTPS :443| Latchz
+    React --> API
+    Enrollment --> DB
+    PKI --> DB
+    MDM --> DB
+    Auth --> Windows
+
+    style Latchz fill:#ff6b6b,stroke:#c92c2c,color:#fff
+    style Devices fill:#e1f5fe,stroke:#0176d7
+    style Storage fill:#f3e5f5,stroke:#7b1fa2
+```
+
 ## Features
 
 - **Native Windows Protocol Support**: Full MS-MDE2 enrollment and OMA-DM/SyncML policy management. No custom agent required.
@@ -14,6 +51,40 @@ Latchz is an open-source, single-binary Windows MDM (Mobile Device Management) s
 - **Zero-touch Deployments**: Uses Microsoft's standard automatic enrollment flow (e.g. `enterpriseenrollment.yourdomain.com`).
 - **Flexible Database**: Supports SQLite for testing and PostgreSQL for production.
 - **Single Binary**: No complex dependencies outside of your chosen database.
+
+## Enrollment Flow
+
+The zero-touch enrollment follows Microsoft's standard OMA-DM protocols:
+
+```mermaid
+sequenceDiagram
+    participant Device as Windows Device
+    participant DNS as DNS Resolution
+    participant Server as Latchz Server
+    participant SOAP as Enrollment.svc
+    participant OIDC as OIDC Auth
+    participant XCEP as MS-XCEP
+    participant WSTEP as MS-WSTEP
+    participant DM as omadm
+
+    Device->>DNS: enterpriseenrollment.<domain>
+    DNS-->>Device: CNAME -> server
+
+    Device->>SOAP: POST /EnterpriseEnrollment/
+    SOAP-->>Device: Discovery Response<br/>(XCEP, WSTEP, Auth URLs)
+
+    Device->>OIDC: GET /auth/login?flow=enroll
+    OIDC-->>Device: Browser login
+
+    Device->>XCEP: POST /xcep (CSR)
+    XCEP-->>Device: Certificate
+
+    Device->>WSTEP: POST /wstep (Token)
+    WSTEP-->>Device: Security Tokens
+
+    Device->>DM: POST /omadm (SyncML)
+    DM-->>Device: Policies Applied
+```
 
 ## Requirements
 

@@ -15,18 +15,17 @@ This guide walks through deploying Latchz MDM on **Google Cloud Run** (free tier
 
 ## Architecture Overview
 
-```
-Windows Device
-     │
-     ▼ HTTPS (port 443)
-enterpriseenrollment.mjo.gg  ──► Cloudflare (DNS proxy)
-                                       │
-                                       ▼
-                              Google Cloud Run
-                              (latchz binary + SQLite)
-                                       │
-                              Google OAuth 2.0 (OIDC)
-                              (login restricted to mjo.gg)
+```mermaid
+graph LR
+  Windows[Windows Device] -->|HTTPS :443| Cloudflare[Cloudflare DNS Proxy]
+  Cloudflare --> GoogleRun[Google Cloud Run<br/>latchz binary + SQLite]
+  GoogleRun --> OAuth[Google OAuth 2.0 / OIDC<br/>restricted to mjo.gg]
+  
+  classDef default fill:#f9f9f9,stroke:#333,stroke-width:2px
+  classDef cloud fill:#e1f5fe,stroke:#0176d7
+  classDef device fill:#f3e5f5,stroke:#7b1fa2
+  class Cloudflare GoogleRun OAuth cloud
+  class Windows device
 ```
 
 > **Note**: Cloud Run handles TLS automatically. No manual cert management needed.
