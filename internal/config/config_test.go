@@ -89,6 +89,30 @@ func TestValidate(t *testing.T) {
 			c.Auth.Provider = "builtin"
 			c.Auth.BootstrapAdmin = "admin@example.com"
 		}, false},
+
+		// ── TLS thumbprint proxy validation ───────────────────────────────
+		{"thumbprint proxy mode valid", func(c *Config) {
+			c.TLS.TrustProxyClientCertThumbprint = true
+			c.TLS.ClientCertThumbprintHeader = "X-Client-Cert-Thumbprint"
+			c.TLS.ClientCertThumbprintAlgorithm = "sha1"
+		}, false},
+		{"thumbprint proxy mode sha256 valid", func(c *Config) {
+			c.TLS.TrustProxyClientCertThumbprint = true
+			c.TLS.ClientCertThumbprintHeader = "X-Client-Cert-Thumbprint"
+			c.TLS.ClientCertThumbprintAlgorithm = "sha256"
+		}, false},
+		{"full cert and thumbprint modes mutually exclusive", func(c *Config) {
+			c.TLS.TrustProxyClientCert = true
+			c.TLS.TrustProxyClientCertThumbprint = true
+		}, true},
+		{"invalid thumbprint algorithm rejected", func(c *Config) {
+			c.TLS.TrustProxyClientCertThumbprint = true
+			c.TLS.ClientCertThumbprintAlgorithm = "md5"
+		}, true},
+		{"empty thumbprint algorithm rejected", func(c *Config) {
+			c.TLS.TrustProxyClientCertThumbprint = true
+			c.TLS.ClientCertThumbprintAlgorithm = ""
+		}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

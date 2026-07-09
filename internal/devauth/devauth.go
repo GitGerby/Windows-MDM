@@ -6,12 +6,14 @@ package devauth
 
 import (
 	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/x509"
 	"database/sql"
 	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	dbpkg "github.com/latchzmdm/latchz/internal/db"
 )
@@ -28,6 +30,23 @@ type Identity struct {
 func Thumbprint(cert *x509.Certificate) string {
 	sum := sha1.Sum(cert.Raw)
 	return fmt.Sprintf("%x", sum[:])
+}
+
+// ThumbprintSHA256 returns the lowercase-hex SHA-256 fingerprint of the
+// DER-encoded certificate. Used when the reverse proxy forwards a SHA-256
+// thumbprint instead of the full certificate.
+func ThumbprintSHA256(cert *x509.Certificate) string {
+	sum := sha256.Sum256(cert.Raw)
+	return fmt.Sprintf("%x", sum[:])
+}
+
+// NormalizeThumbprint strips colons, spaces, and case-normalizes a
+// hex-encoded thumbprint to lowercase. Handles formats from nginx, HAProxy,
+// Apache, and other common reverse proxies.
+func NormalizeThumbprint(raw string) string {
+	s := strings.ReplaceAll(raw, ":", "")
+	s = strings.ReplaceAll(s, " ", "")
+	return strings.ToLower(s)
 }
 
 // ClientCert extracts the presented client certificate from the TLS peer chain
@@ -77,6 +96,73 @@ func Resolve(db *sql.DB, caPool *x509.CertPool, r *http.Request, proxyHeader str
 	}
 	if err != nil {
 		return nil, fmt.Errorf("database error looking up device: %w", err)
+	}
+	return id, nil
+}
+
+// ResolveByThumbprint authenticates a device using only a certificate
+// thumbprint forwarded by a trusted terminating proxy. Unlike Resolve(), this
+// does NOT verify the certificate chains to a CA (the proxy is trusted to have
+// performed that validation). The thumbprint is normalized and compared against
+// stored thumbprints in the database.
+//
+// algorithm must be "sha1" or "sha256" and must match what the proxy uses.
+func ResolveByThumbprint(db *sql.DB, r *http.Request, headerName string, algorithm string) (*Identity, error) {
+	raw := r.Header.Get(headerName)
+	if raw == "" {
+		return nil, fmt.Errorf("client certificate thumbprint required: trusted-proxy header %q is empty", headerName)
+	}
+
+	thumbprint := NormalizeThumbprint(raw)
+
+	switch strings.ToLower(algorithm) {
+	case "sha1":
+		if len(thumbprint) != 40 {
+			return nil, fmt.Errorf("invalid SHA-1 thumbprint length: got %d chars, want 40", len(thumbprint))
+		}
+	case "sha256":
+		if len(thumbprint) != 64 {
+			return nil, fmt.Errorf("invalid SHA-256 thumbprint length: got %d chars, want 64", len(thumbprint))
+		}
+	default:
+		return nil, fmt.Errorf("unsupported thumbprint algorithm: %q (must be sha1 or sha256)", algorithm)
+	}
+
+	// Validate thumbprint is valid hex
+	for _, c := range thumbprint {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return nil, fmt.Errorf("invalid hex character in thumbprint: %q", c)
+		}
+	}
+
+	id := &Identity{}
+	switch strings.ToLower(algorithm) {
+	case "sha1":
+		err := db.QueryRow(dbpkg.Rebind(`
+			SELECT c.device_id, COALESCE(d.enrolled_by, '')
+			FROM certificates c
+			JOIN devices d ON d.id = c.device_id
+			WHERE c.thumbprint = ? AND c.cert_type = 'device' AND c.revoked = 0
+		`), thumbprint).Scan(&id.DeviceID, &id.EnrolledBy)
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("no active device for certificate thumbprint %s (revoked or unknown)", thumbprint)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("database error looking up device: %w", err)
+		}
+	case "sha256":
+		err := db.QueryRow(dbpkg.Rebind(`
+			SELECT c.device_id, COALESCE(d.enrolled_by, '')
+			FROM certificates c
+			JOIN devices d ON d.id = c.device_id
+			WHERE c.thumbprint_sha256 = ? AND c.cert_type = 'device' AND c.revoked = 0
+		`), thumbprint).Scan(&id.DeviceID, &id.EnrolledBy)
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("no active device for certificate SHA-256 thumbprint %s (revoked or unknown)", thumbprint)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("database error looking up device: %w", err)
+		}
 	}
 	return id, nil
 }

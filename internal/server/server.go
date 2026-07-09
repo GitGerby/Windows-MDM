@@ -86,8 +86,16 @@ func New(cfg *config.Config, database *db.DB, ca *pki.CA) (*Server, error) {
 		proxyCertHeader = cfg.TLS.ClientCertHeader
 	}
 
+	// Trusted-proxy client-cert thumbprint header (thumbprint-only mTLS mode).
+	proxyThumbprintHeader := ""
+	proxyThumbprintAlgorithm := ""
+	if cfg.TLS.TrustProxyClientCertThumbprint {
+		proxyThumbprintHeader = cfg.TLS.ClientCertThumbprintHeader
+		proxyThumbprintAlgorithm = cfg.TLS.ClientCertThumbprintAlgorithm
+	}
+
 	enrollHandler := enrollment.NewHandler(cfg.Server.Domain, cfg.Server.EnrollmentDomain)
-	mdmHandler := mdm.NewHandler(database.DB, ca.TLSPool(), cfg.Server.Domain, proxyCertHeader)
+	mdmHandler := mdm.NewHandler(database.DB, ca.TLSPool(), cfg.Server.Domain, proxyCertHeader, proxyThumbprintHeader, proxyThumbprintAlgorithm)
 	apiHandler := api.NewHandler(database.DB)
 
 	s := &Server{
@@ -151,12 +159,13 @@ func (s *Server) Handler() http.Handler {
 // behindProxy reports whether the server runs behind a trusted reverse proxy and
 // may therefore trust forwarded client-IP headers. True when explicitly
 // configured (server.trusted_proxy), or implied by TLS being terminated upstream
-// (tls.mode=none) or a forwarded client cert being trusted. Operators whose
-// origin terminates TLS itself but sits behind an L7 proxy/load balancer that
-// sets X-Forwarded-For must set server.trusted_proxy so the rate limiters key on
-// the real client IP rather than collapsing every client into one bucket.
+// (tls.mode=none), a forwarded client cert being trusted, or thumbprint-based
+// proxy auth enabled. Operators whose origin terminates TLS itself but sits
+// behind an L7 proxy/load balancer that sets X-Forwarded-For must set
+// server.trusted_proxy so the rate limiters key on the real client IP rather
+// than collapsing every client into one bucket.
 func (s *Server) behindProxy() bool {
-	return s.cfg.Server.TrustedProxy || s.cfg.TLS.Mode == "none" || s.cfg.TLS.TrustProxyClientCert
+	return s.cfg.Server.TrustedProxy || s.cfg.TLS.Mode == "none" || s.cfg.TLS.TrustProxyClientCert || s.cfg.TLS.TrustProxyClientCertThumbprint
 }
 
 // routes registers all HTTP handlers.

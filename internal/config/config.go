@@ -63,6 +63,21 @@ type TLSConfig struct {
 	// ClientCertHeader is the header carrying the URL-encoded PEM client cert
 	// (e.g. nginx $ssl_client_escaped_cert). Default: X-Forwarded-Client-Cert.
 	ClientCertHeader string `mapstructure:"client_cert_header"`
+
+	// TrustProxyClientCertThumbprint enables authenticating OMA-DM devices
+	// via a certificate thumbprint forwarded by a trusted terminating proxy.
+	// The proxy performs mTLS and sets a header with the SHA-1 or SHA-256
+	// hash of the client certificate. The server trusts the proxy performed
+	// full certificate validation. Mutually exclusive with TrustProxyClientCert.
+	TrustProxyClientCertThumbprint bool `mapstructure:"trust_proxy_client_cert_thumbprint"`
+	// ClientCertThumbprintHeader is the header carrying the hex-encoded client
+	// certificate thumbprint (case-insensitive, with or without colons).
+	// Default: X-Client-Cert-Thumbprint.
+	ClientCertThumbprintHeader string `mapstructure:"client_cert_thumbprint_header"`
+	// ClientCertThumbprintAlgorithm is the hash algorithm used by the proxy
+	// to compute the thumbprint. One of: "sha1" (default), "sha256".
+	// Must match what the proxy computes.
+	ClientCertThumbprintAlgorithm string `mapstructure:"client_cert_thumbprint_algorithm"`
 }
 
 // DatabaseConfig selects the database backend.
@@ -122,6 +137,9 @@ func Load(cfgFile string) (*Config, error) {
 	v.SetDefault("tls.key_file", "")
 	v.SetDefault("tls.trust_proxy_client_cert", false)
 	v.SetDefault("tls.client_cert_header", "X-Forwarded-Client-Cert")
+	v.SetDefault("tls.trust_proxy_client_cert_thumbprint", false)
+	v.SetDefault("tls.client_cert_thumbprint_header", "X-Client-Cert-Thumbprint")
+	v.SetDefault("tls.client_cert_thumbprint_algorithm", "sha1")
 	v.SetDefault("database.driver", "sqlite")
 	v.SetDefault("database.dsn", "./latchz.db")
 	v.SetDefault("auth.provider", "oidc")
@@ -143,6 +161,9 @@ func Load(cfgFile string) (*Config, error) {
 	_ = v.BindEnv("tls.mode", "LATCHZ_TLS_MODE")
 	_ = v.BindEnv("tls.trust_proxy_client_cert", "LATCHZ_TLS_TRUST_PROXY_CLIENT_CERT")
 	_ = v.BindEnv("tls.client_cert_header", "LATCHZ_TLS_CLIENT_CERT_HEADER")
+	_ = v.BindEnv("tls.trust_proxy_client_cert_thumbprint", "LATCHZ_TLS_TRUST_PROXY_CLIENT_CERT_THUMBPRINT")
+	_ = v.BindEnv("tls.client_cert_thumbprint_header", "LATCHZ_TLS_CLIENT_CERT_THUMBPRINT_HEADER")
+	_ = v.BindEnv("tls.client_cert_thumbprint_algorithm", "LATCHZ_TLS_CLIENT_CERT_THUMBPRINT_ALGORITHM")
 	_ = v.BindEnv("database.driver", "LATCHZ_DATABASE_DRIVER")
 	_ = v.BindEnv("database.dsn", "LATCHZ_DATABASE_DSN")
 	_ = v.BindEnv("auth.provider", "LATCHZ_AUTH_PROVIDER")
@@ -242,5 +263,19 @@ func (c *Config) validate() error {
 	default:
 		return fmt.Errorf("auth.provider %q is invalid (one of: oidc, builtin)", c.Auth.Provider)
 	}
+
+	// TrustProxyClientCert and TrustProxyClientCertThumbprint are mutually exclusive.
+	if c.TLS.TrustProxyClientCert && c.TLS.TrustProxyClientCertThumbprint {
+		return fmt.Errorf("tls.trust_proxy_client_cert and tls.trust_proxy_client_cert_thumbprint are mutually exclusive")
+	}
+
+	// Validate thumbprint algorithm when thumbprint mode is enabled.
+	if c.TLS.TrustProxyClientCertThumbprint {
+		alg := strings.ToLower(c.TLS.ClientCertThumbprintAlgorithm)
+		if alg != "sha1" && alg != "sha256" {
+			return fmt.Errorf("tls.client_cert_thumbprint_algorithm must be \"sha1\" or \"sha256\" when thumbprint mode is enabled")
+		}
+	}
+
 	return nil
 }

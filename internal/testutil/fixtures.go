@@ -27,8 +27,8 @@ var (
 )
 
 type caFixtureRow struct {
-	subject, thumbprint, serial, certPEM, keyEnc string
-	notBefore, notAfter                          time.Time
+	subject, thumbprint, thumbprintSHA256, serial, certPEM, keyEnc string
+	notBefore, notAfter                                          time.Time
 }
 
 func buildCAFixture() {
@@ -51,9 +51,9 @@ func buildCAFixture() {
 		return
 	}
 	caErr = database.QueryRow(`
-		SELECT subject, thumbprint, serial_number, not_before, not_after, cert_pem, key_pem_encrypted
+		SELECT subject, thumbprint, thumbprint_sha256, serial_number, not_before, not_after, cert_pem, key_pem_encrypted
 		FROM certificates WHERE cert_type = 'root_ca' LIMIT 1
-	`).Scan(&caRow.subject, &caRow.thumbprint, &caRow.serial, &caRow.notBefore, &caRow.notAfter, &caRow.certPEM, &caRow.keyEnc)
+	`).Scan(&caRow.subject, &caRow.thumbprint, &caRow.thumbprintSHA256, &caRow.serial, &caRow.notBefore, &caRow.notAfter, &caRow.certPEM, &caRow.keyEnc)
 }
 
 // CA returns a *pki.CA backed by the given database, reusing a process-wide
@@ -65,9 +65,9 @@ func CA(t testing.TB, database *db.DB) *pki.CA {
 		t.Fatalf("testutil: building CA fixture: %v", caErr)
 	}
 	_, err := database.Exec(db.Rebind(`
-		INSERT INTO certificates (cert_type, subject, thumbprint, serial_number, not_before, not_after, cert_pem, key_pem_encrypted)
-		VALUES ('root_ca', ?, ?, ?, ?, ?, ?, ?)
-	`), caRow.subject, caRow.thumbprint, caRow.serial, caRow.notBefore, caRow.notAfter, caRow.certPEM, caRow.keyEnc)
+		INSERT INTO certificates (cert_type, subject, thumbprint, thumbprint_sha256, serial_number, not_before, not_after, cert_pem, key_pem_encrypted)
+		VALUES ('root_ca', ?, ?, ?, ?, ?, ?, ?, ?)
+	`), caRow.subject, caRow.thumbprint, caRow.thumbprintSHA256, caRow.serial, caRow.notBefore, caRow.notAfter, caRow.certPEM, caRow.keyEnc)
 	if err != nil {
 		t.Fatalf("testutil: inserting CA fixture row: %v", err)
 	}

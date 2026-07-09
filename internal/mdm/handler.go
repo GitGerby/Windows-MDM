@@ -26,12 +26,31 @@ type Handler struct {
 	// URL-encoded PEM client certificate forwarded by a trusted terminating
 	// proxy (tls.mode=none). Empty means only direct mTLS is accepted.
 	proxyCertHeader string
+
+	// proxyThumbprintHeader, when non-empty, names a request header carrying
+	// a hex-encoded certificate thumbprint forwarded by a trusted proxy.
+	// The proxy performs full mTLS validation; the server only looks up the
+	// thumbprint in the database.
+	proxyThumbprintHeader string
+
+	// proxyThumbprintAlgorithm is "sha1" or "sha256", matching the proxy.
+	proxyThumbprintAlgorithm string
 }
 
 // NewHandler creates an OMA-DM handler. proxyCertHeader is "" unless a trusted
 // proxy is configured to forward the device client certificate.
-func NewHandler(db *sql.DB, caPool *x509.CertPool, domain, proxyCertHeader string) *Handler {
-	return &Handler{db: db, ca: caPool, domain: domain, store: newSessionStore(), proxyCertHeader: proxyCertHeader}
+// proxyThumbprintHeader and proxyThumbprintAlgorithm configure thumbprint-based
+// auth when proxyThumbprintHeader is non-empty.
+func NewHandler(db *sql.DB, caPool *x509.CertPool, domain, proxyCertHeader, proxyThumbprintHeader, proxyThumbprintAlgorithm string) *Handler {
+	if proxyThumbprintAlgorithm == "" {
+		proxyThumbprintAlgorithm = "sha1"
+	}
+	return &Handler{
+		db: db, ca: caPool, domain: domain, store: newSessionStore(),
+		proxyCertHeader:        proxyCertHeader,
+		proxyThumbprintHeader:  proxyThumbprintHeader,
+		proxyThumbprintAlgorithm: proxyThumbprintAlgorithm,
+	}
 }
 
 // HandleOMADM is the main OMA-DM endpoint. Devices POST here on every check-in.
@@ -265,6 +284,15 @@ func (h *Handler) HandleOMADM(w http.ResponseWriter, r *http.Request) {
 // hardware-ID fallback: a hardware_id is not a secret. Resolution rules live in
 // the shared devauth package so the OMA-DM and WSTEP-renewal paths stay in sync.
 func (h *Handler) authenticateDevice(r *http.Request) (string, error) {
+	// Thumbprint-only mode: proxy trusted to have performed full mTLS validation.
+	if h.proxyThumbprintHeader != "" {
+		id, err := devauth.ResolveByThumbprint(h.db, r, h.proxyThumbprintHeader, h.proxyThumbprintAlgorithm)
+		if err != nil {
+			return "", err
+		}
+		return id.DeviceID, nil
+	}
+	// Full cert mode: PEM header or direct mTLS, with CA verification.
 	id, err := devauth.Resolve(h.db, h.ca, r, h.proxyCertHeader)
 	if err != nil {
 		return "", err

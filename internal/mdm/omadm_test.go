@@ -13,7 +13,7 @@ func TestHandleOMADM_FirstCheckIn(t *testing.T) {
 	ca := testutil.CA(t, database)
 	deviceID := testutil.SeedDevice(t, database, "HW-OMADM")
 	cert := testutil.IssueClientCert(t, ca, deviceID, "PaneMDMClient")
-	h := NewHandler(database.DB, ca.TLSPool(), "mdm.example.com", "")
+	h := NewHandler(database.DB, ca.TLSPool(), "mdm.example.com", "", "", "")
 
 	syncml := `<?xml version="1.0" encoding="UTF-8"?>
 <SyncML xmlns="SYNCML:SYNCML1.2">
@@ -63,7 +63,7 @@ func TestHandleOMADM_WipeFinalizesOnDelivery(t *testing.T) {
 	if _, err := EnqueueWipe(database.DB, deviceID); err != nil {
 		t.Fatal(err)
 	}
-	h := NewHandler(database.DB, ca.TLSPool(), "mdm.example.com", "")
+	h := NewHandler(database.DB, ca.TLSPool(), "mdm.example.com", "", "", "")
 
 	syncml := `<?xml version="1.0"?>
 <SyncML xmlns="SYNCML:SYNCML1.2">
@@ -95,7 +95,7 @@ func TestHandleOMADM_WipeFinalizesOnDelivery(t *testing.T) {
 func TestHandleOMADM_RejectsUnauthenticated(t *testing.T) {
 	database := testutil.DB(t)
 	ca := testutil.CA(t, database)
-	h := NewHandler(database.DB, ca.TLSPool(), "mdm.example.com", "")
+	h := NewHandler(database.DB, ca.TLSPool(), "mdm.example.com", "", "", "")
 
 	req := httptest.NewRequest("POST", "/omadm?hwid=HW-OMADM", strings.NewReader("<SyncML/>"))
 	w := httptest.NewRecorder()

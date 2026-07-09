@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"database/sql"
@@ -140,13 +141,15 @@ func (ca *CA) generate(masterSecret string) (*CA, error) {
 	}
 
 	thumbprint := calculateThumbprint(cert)
+	thumbprintSHA256 := calculateThumbprintSHA256(cert)
 
 	_, err = ca.db.Exec(dbpkg.Rebind(`
-		INSERT INTO certificates (cert_type, subject, thumbprint, serial_number, not_before, not_after, cert_pem, key_pem_encrypted)
-		VALUES ('root_ca', ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO certificates (cert_type, subject, thumbprint, thumbprint_sha256, serial_number, not_before, not_after, cert_pem, key_pem_encrypted)
+		VALUES ('root_ca', ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		cert.Subject.CommonName,
 		thumbprint,
+		thumbprintSHA256,
 		cert.SerialNumber.String(),
 		cert.NotBefore,
 		cert.NotAfter,
@@ -229,13 +232,15 @@ func (ca *CA) IssueDeviceCert(deviceID, enrolledBy string, csrPEM []byte) ([]byt
 
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 	thumbprint := calculateThumbprint(cert)
+	thumbprintSHA256 := calculateThumbprintSHA256(cert)
 
 	_, err = ca.db.Exec(dbpkg.Rebind(`
-		INSERT INTO certificates (cert_type, subject, thumbprint, serial_number, not_before, not_after, cert_pem, device_id)
-		VALUES ('device', ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO certificates (cert_type, subject, thumbprint, thumbprint_sha256, serial_number, not_before, not_after, cert_pem, device_id)
+		VALUES ('device', ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		cert.Subject.CommonName,
 		thumbprint,
+		thumbprintSHA256,
 		cert.SerialNumber.String(),
 		cert.NotBefore,
 		cert.NotAfter,
@@ -358,5 +363,12 @@ func decryptKey(encoded string, masterSecret string) ([]byte, error) {
 // calculateThumbprint computes the SHA-1 hash of the certificate DER (standard X.509 thumbprint).
 func calculateThumbprint(cert *x509.Certificate) string {
 	h := sha1.Sum(cert.Raw)
+	return fmt.Sprintf("%x", h[:])
+}
+
+// calculateThumbprintSHA256 computes the lowercase-hex SHA-256 hash of the
+// certificate DER. Used for reverse-proxy thumbprint authentication.
+func calculateThumbprintSHA256(cert *x509.Certificate) string {
+	h := sha256.Sum256(cert.Raw)
 	return fmt.Sprintf("%x", h[:])
 }
